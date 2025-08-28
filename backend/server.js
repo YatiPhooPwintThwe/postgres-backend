@@ -2,61 +2,43 @@ import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
-import path from "path";
+
 import productRoutes from "./routes/productRoutes.js";
 import { sql } from "./config/db.js";
-import { aj as ajDetect, ajRate } from "../lib/arcjet.js"; // shield+detectBot, rate limit
+import { aj } from "../lib/arcjet.js";  
 
 const app = express();
 const PORT = process.env.PORT || 3002;
 const TEST_TOKEN = process.env.INTERNAL_TEST_TOKEN || "";
 
-if (process.env.NODE_ENV === "production") {
-  app.set("trust proxy", 1); // behind Render’s proxy
-}
+app.set("trust proxy", 1);
 
-const __dirname = path.resolve();
-app.use(express.json());
+// Base middleware
+app.disable("x-powered-by");
 app.use(helmet());
 app.use(morgan("dev"));
+app.use(express.json({ limit: "1mb" }));
 
-// 1) Bot detection for public;  Postman bypasses with X-Test-Token
+// Arcjet: shield + bot detect + rate limit
 app.use(async (req, res, next) => {
   try {
-    const isTester = req.get("X-Test-Token") === TEST_TOKEN;
-    if (!isTester) {
-      const d = await ajDetect.protect(req, { requested: 1 });
-      if (d.isDenied()) {
-        const code = d.statusCode ?? 403;
-        return res.status(code).json({
-          error: d.reason?.isBot?.() ? "Bot access denied" : "Forbidden",
-        });
-      }
+    const decision = await aj.protect(req, { requested: 1 });
+    if (decision.isDenied()) {
+      const code = decision.statusCode ?? 403;
+      const msg =
+        decision.reason?.isRateLimited?.() ? "Too Many Requests" :
+        decision.reason?.isBot?.()         ? "Bot access denied" :
+                                              "Forbidden";
+      return res.status(code).json({ error: msg });
     }
     next();
   } catch (err) {
-    console.error("Arcjet detect error:", err);
+    console.error("Arcjet error:", err);
     next();
   }
 });
 
-// 2) Rate limit for everyone (including me)
-app.use(async (req, res, next) => {
-  try {
-    const r = await ajRate.protect(req, { requested: 1 });
-    if (r.isDenied()) {
-      return res
-        .status(r.statusCode ?? 429)
-        .json({ error: "Too Many Requests" });
-    }
-    next();
-  } catch (err) {
-    console.error("Arcjet rate error:", err);
-    next();
-  }
-});
-
-// 3) Write guard: only tester header can write (until we add auth)
+// Write guard (temporary, until real auth)
 app.use((req, res, next) => {
   const isWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
   if (!isWrite) return next();
