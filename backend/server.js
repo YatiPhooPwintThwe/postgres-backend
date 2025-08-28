@@ -11,6 +11,10 @@ const app = express();
 const PORT = process.env.PORT || 3002;
 const TEST_TOKEN = process.env.INTERNAL_TEST_TOKEN || "";
 
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1); // behind Render’s proxy
+}
+
 const __dirname = path.resolve();
 app.use(express.json());
 app.use(helmet());
@@ -63,9 +67,6 @@ app.use((req, res, next) => {
 // Routes
 app.use("/api/products", productRoutes);
 
-if(process.env.NODE_ENV === "production") {
-  app.set("trust proxy", 1);
-}
 
 // Ensure table exists
 async function initDB() {
