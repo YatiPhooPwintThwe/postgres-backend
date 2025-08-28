@@ -1,4 +1,4 @@
-import express from "express";
+import { Router } from "express";
 import {
   createProduct,
   getProducts,
@@ -7,12 +7,13 @@ import {
   deleteProduct,
 } from "../controllers/productController.js";
 
-const router = express.Router();
+const router = Router();
 
-router.get("/", getProducts);
-router.get("/:id", getProduct);
-router.post("/", createProduct);
-router.put("/:id", updateProduct);
+// These are RELATIVE to /api/products:
+router.get("/", getProducts); // GET /api/products
+router.get("/:id", getProduct); // GET /api/products/:id
+router.post("/", createProduct); // POST /api/products
+router.put("/:id", updateProduct); // PUT /api/products/:id
 router.delete("/:id", deleteProduct);
 
 export default router;
