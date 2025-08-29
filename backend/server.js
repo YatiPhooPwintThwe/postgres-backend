@@ -19,6 +19,7 @@ app.use(helmet());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "1mb" }));
 
+
 // ---------- simple root + health ----------
 app.get("/", (_req, res) => {
   res.json({ name: "Postgres Products API", status: "ok" });
@@ -30,6 +31,18 @@ app.get("/health", (_req, res) => {
 
 // ---------- Arcjet: rate-limit ALL; bot/shield only on WRITES ----------
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+
+
+app.get("/", (req, res) => {
+  res.json({ name: "Postgres Products API", status: "ok" });
+});
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", uptime: process.uptime() });
+});
+
+// Arcjet: shield + bot detect + rate limit
 
 app.use(async (req, res, next) => {
   // Always allow health/root and preflight
