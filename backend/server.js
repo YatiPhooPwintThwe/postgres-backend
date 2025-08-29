@@ -19,6 +19,15 @@ app.use(helmet());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "1mb" }));
 
+
+app.get("/", (req, res) => {
+  res.json({ name: "Postgres Products API", status: "ok" });
+});
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", uptime: process.uptime() });
+});
+
 // Arcjet: shield + bot detect + rate limit
 app.use(async (req, res, next) => {
   try {
