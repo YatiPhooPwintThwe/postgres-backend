@@ -20,12 +20,21 @@ app.use(helmet());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "1mb" }));
 
+
 // Root + health
 app.get("/", (_req, res) => res.json({ name: "Postgres Products API", status: "ok" }));
 app.get("/health", (_req, res) => res.json({ status: "ok", uptime: process.uptime() }));
 
+
+// ---------- simple root + health ----------
+app.get("/", (_req, res) => {
+  res.json({ name: "Postgres Products API", status: "ok" });
+});
+
+
 // ---------- Arcjet gate ----------
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 
 // Optional: bypass list for your own testing (IP or token)
 // - Header: X-Bypass-RateLimit: <TEST_TOKEN>
@@ -33,6 +42,19 @@ const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const BYPASS_IPS = new Set([
   "127.0.0.1", "::1",
 ]);
+
+
+
+app.get("/", (req, res) => {
+  res.json({ name: "Postgres Products API", status: "ok" });
+});
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", uptime: process.uptime() });
+});
+
+// Arcjet: shield + bot detect + rate limit
+
 
 app.use(async (req, res, next) => {
   if (req.path === "/" || req.path === "/health" || req.method === "OPTIONS") {
