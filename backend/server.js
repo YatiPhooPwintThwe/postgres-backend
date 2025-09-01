@@ -5,12 +5,13 @@ import morgan from "morgan";
 
 import productRoutes from "./routes/productRoutes.js";
 import { sql } from "./config/db.js";
-import { aj } from "../lib/arcjet.js";  
+import { aj, ajRate } from "../lib/arcjet.js";   // <-- import both
 
 const app = express();
 const PORT = process.env.PORT || 3002;
 const TEST_TOKEN = process.env.INTERNAL_TEST_TOKEN || "";
 
+// trust proxy so Arcjet sees client IP on Railway/Render/NGINX/etc
 app.set("trust proxy", 1);
 
 // Base middleware
@@ -19,39 +20,44 @@ app.use(helmet());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "1mb" }));
 
-// ---------- simple root + health ----------
-app.get("/", (_req, res) => {
-  res.json({ name: "Postgres Products API", status: "ok" });
-});
+// Root + health
+app.get("/", (_req, res) => res.json({ name: "Postgres Products API", status: "ok" }));
+app.get("/health", (_req, res) => res.json({ status: "ok", uptime: process.uptime() }));
 
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", uptime: process.uptime() });
-});
-
-// ---------- Arcjet: rate-limit ALL; bot/shield only on WRITES ----------
+// ---------- Arcjet gate ----------
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+// Optional: bypass list for your own testing (IP or token)
+// - Header: X-Bypass-RateLimit: <TEST_TOKEN>
+// - OR whitelist your IP(s) below (be careful in prod)
+const BYPASS_IPS = new Set([
+  "127.0.0.1", "::1",
+]);
+
 app.use(async (req, res, next) => {
-  // Always allow health/root and preflight
   if (req.path === "/" || req.path === "/health" || req.method === "OPTIONS") {
     return next();
   }
 
-  // 1) Global rate limit (applies to every request)
+  // ---- self/bypass (skip rate limit & bot/shield) ----
+  const bypassByHeader = TEST_TOKEN && req.get("X-Bypass-RateLimit") === TEST_TOKEN;
+  const bypassByIp = BYPASS_IPS.has(req.ip);
+  if (bypassByHeader || bypassByIp) return next();
+
+  // 1) Global rate limit
   try {
     const rl = await ajRate.protect(req, { requested: 1 });
     if (rl.isDenied()) {
       return res.status(rl.statusCode ?? 429).json({ error: "Too Many Requests" });
     }
   } catch (e) {
-    // fail-open on limiter errors
-    console.warn("Rate limiter error:", e);
+    console.warn("Rate limiter error:", e); // fail-open
   }
 
-  // 2) Bot detection + shield only for write methods
+  // 2) Bot/shield only on writes
   if (!WRITE_METHODS.has(req.method)) return next();
 
-  // Optional: allow common API tools for your own testing
+  // Allow common API tools when *not* bypassing
   const ua = (req.get("user-agent") || "").toLowerCase();
   if (/postman|curl|insomnia/.test(ua)) return next();
 
@@ -66,14 +72,13 @@ app.use(async (req, res, next) => {
       return res.status(code).json({ error: msg });
     }
   } catch (err) {
-    console.error("Arcjet error:", err);
-    // fail-open so API still works if Arcjet hiccups
+    console.error("Arcjet error:", err); // fail-open
   }
 
   next();
 });
 
-// ---------- temporary write guard (until real auth) ----------
+// Temporary write guard (until real auth)
 app.use((req, res, next) => {
   if (!WRITE_METHODS.has(req.method)) return next();
   if (req.get("X-Test-Token") === TEST_TOKEN) return next();
@@ -83,20 +88,16 @@ app.use((req, res, next) => {
 // Routes
 app.use("/api/products", productRoutes);
 
-// ---------- 404 ----------
-app.use((req, res) => {
-  res.status(404).json({ error: "Not Found" });
-});
+// 404
+app.use((req, res) => res.status(404).json({ error: "Not Found" }));
 
-// ---------- centralized error handler ----------
+// Error handler
 app.use((err, req, res, _next) => {
   console.error("Unhandled error:", err);
-  const status = err.statusCode || 500;
-  res.status(status).json({ error: err.message || "Internal Server Error" });
+  res.status(err.statusCode || 500).json({ error: err.message || "Internal Server Error" });
 });
 
-
-// Ensure table exists
+// Ensure table exists + start
 async function initDB() {
   try {
     await sql`
@@ -111,6 +112,10 @@ async function initDB() {
   } catch (err) {
     console.error("Error initDB:", err);
   }
+}
+
+if (!process.env.ARCJET_KEY) {
+  console.warn("⚠️ ARCJET_KEY is missing. Arcjet will fail-open or warn in dev.");
 }
 
 initDB().then(() => {
